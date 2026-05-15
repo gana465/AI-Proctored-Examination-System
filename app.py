@@ -1,7 +1,6 @@
 from flask import Flask, render_template, Response, jsonify
 import cv2
 import numpy as np
-import sounddevice as sd
 import threading
 import os
 import time
@@ -36,82 +35,19 @@ status = "Normal"
 face_status = "Detected"
 motion_status = "No"
 block_status = "No"
-voice_status = "No"
 
 FRAME_LIMIT = 20
 MOTION_AREA = 6000
 BRIGHTNESS_THRESHOLD = 35
 MAX_ALERTS = 3
 
-# Voice Settings
-VOICE_THRESHOLD = 0.03
-VOICE_DURATION_LIMIT = 22
-
 no_face_frames = 0
 multi_face_frames = 0
 away_frames = 0
 motion_frames = 0
 blocked_frames = 0
-voice_frames = 0
 
 prev_gray = None
-
-# =========================================
-# VOICE VARIABLES
-# =========================================
-
-voice_detected = False
-current_volume = 0
-
-last_voice_alert_time = 0
-
-# =========================================
-# VOICE THREAD
-# =========================================
-
-def voice_monitor():
-
-    global voice_detected
-    global current_volume
-
-    while True:
-
-        try:
-
-            audio = sd.rec(
-                int(0.3 * 44100),
-                samplerate=44100,
-                channels=1,
-                dtype='float32'
-            )
-
-            sd.wait()
-
-            volume = np.max(np.abs(audio))
-
-            current_volume = float(volume)
-
-            print("Voice Volume:", volume)
-
-            if volume > VOICE_THRESHOLD:
-
-                voice_detected = True
-
-            else:
-
-                voice_detected = False
-
-        except Exception as e:
-
-            print("Mic Error:", e)
-
-            voice_detected = False
-
-
-threading.Thread(
-    target=voice_monitor,
-    daemon=True
-).start()
 
 # =========================================
 # VIDEO STREAM
@@ -125,17 +61,14 @@ def generate_frames():
     global face_status
     global motion_status
     global block_status
-    global voice_status
 
     global no_face_frames
     global multi_face_frames
     global away_frames
     global motion_frames
     global blocked_frames
-    global voice_frames
 
     global prev_gray
-    global last_voice_alert_time
 
     while True:
 
@@ -310,38 +243,6 @@ def generate_frames():
         prev_gray = blur
 
         # =========================================
-        # VOICE DETECTION
-        # =========================================
-
-        current_time = time.time()
-
-        if voice_detected:
-
-            voice_frames += 1
-
-            voice_status = "Detected"
-
-            if (
-                voice_frames >= VOICE_DURATION_LIMIT and
-                current_time - last_voice_alert_time > 7
-            ):
-
-                alerts += 1
-
-                status = "Abnormal Voice"
-
-                voice_frames = 0
-
-                last_voice_alert_time = current_time
-
-        else:
-
-            voice_status = "No"
-
-            if voice_frames > 0:
-                voice_frames -= 1
-
-        # =========================================
         # TERMINATE EXAM
         # =========================================
 
@@ -399,26 +300,6 @@ def generate_frames():
             2
         )
 
-        cv2.putText(
-            frame,
-            f"Voice: {voice_status}",
-            (20, 120),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 255, 0),
-            2
-        )
-
-        cv2.putText(
-            frame,
-            f"Mic Level: {round(current_volume, 3)}",
-            (20, 160),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 255, 255),
-            2
-        )
-
         ret, buffer = cv2.imencode('.jpg', frame)
 
         frame = buffer.tobytes()
@@ -463,8 +344,7 @@ def get_status():
         'alerts': alerts,
         'face': face_status,
         'motion': motion_status,
-        'blocked': block_status,
-        'voice': voice_status
+        'blocked': block_status
     })
 
 # =========================================
