@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta name="viewport"
+          content="width=device-width, initial-scale=1.0">
+
+    <title>AI Proctored Examination System</title>
+
+    <style>
+
+        *{
+            margin:0;
+            padding:0;
+            box-sizing:border-box;
+        }
+
+        body{
+
+            font-family:Arial, sans-serif;
+
+            background:
+            linear-gradient(
+                135deg,
+                #020b2d,
+                #081b4d,
+                #0a2d6f
+            );
+
+            color:white;
+
+            min-height:100vh;
+        }
+
+        /* HEADER */
+
+        .header{
+
+            width:100%;
+
+            padding:25px;
+
+            text-align:center;
+
+            font-size:40px;
+
+            font-weight:bold;
+
+            letter-spacing:2px;
+
+            background:
+            rgba(255,255,255,0.08);
+
+            backdrop-filter:blur(10px);
+
+            border-bottom:
+            2px solid rgba(255,255,255,0.1);
+
+            box-shadow:
+            0 4px 20px rgba(0,0,0,0.4);
+        }
+
+        /* MAIN CONTAINER */
+
+        .container{
+
+            display:flex;
+
+            gap:25px;
+
+            padding:25px;
+        }
+
+        /* VIDEO SECTION */
+
+        .video-section{
+
+            flex:3;
+
+            background:
+            rgba(255,255,255,0.08);
+
+            border-radius:20px;
+
+            padding:20px;
+
+            backdrop-filter:blur(10px);
+
+            box-shadow:
+            0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        video{
+
+            width:100%;
+
+            border-radius:15px;
+
+            border:4px solid #00bfff;
+
+            box-shadow:
+            0 0 25px rgba(0,191,255,0.6);
+        }
+
+        /* STATUS PANEL */
+
+        .status-panel{
+
+            flex:1;
+
+            display:flex;
+
+            flex-direction:column;
+
+            gap:20px;
+        }
+
+        /* STATUS CARDS */
+
+        .card{
+
+            background:
+            rgba(255,255,255,0.08);
+
+            backdrop-filter:blur(12px);
+
+            border-radius:20px;
+
+            padding:25px;
+
+            text-align:center;
+
+            font-size:26px;
+
+            font-weight:bold;
+
+            box-shadow:
+            0 8px 25px rgba(0,0,0,0.4);
+
+            transition:0.3s;
+        }
+
+        .card:hover{
+
+            transform:translateY(-5px);
+
+            box-shadow:
+            0 12px 35px rgba(0,0,0,0.6);
+        }
+
+        /* COLORS */
+
+        .status{
+            background:linear-gradient(
+                135deg,
+                #ff512f,
+                #dd2476
+            );
+        }
+
+        .alerts{
+            background:linear-gradient(
+                135deg,
+                #ff9966,
+                #ff5e62
+            );
+        }
+
+        .face{
+            background:linear-gradient(
+                135deg,
+                #00c6ff,
+                #0072ff
+            );
+        }
+
+        .motion{
+            background:linear-gradient(
+                135deg,
+                #56ab2f,
+                #a8e063
+            );
+        }
+
+        .voice{
+            background:linear-gradient(
+                135deg,
+                #8e2de2,
+                #4a00e0
+            );
+        }
+
+        /* FOOTER */
+
+        .footer{
+
+            text-align:center;
+
+            padding:15px;
+
+            font-size:18px;
+
+            opacity:0.8;
+        }
+
+        /* MOBILE */
+
+        @media(max-width:900px){
+
+            .container{
+
+                flex-direction:column;
+            }
+
+            .status-panel{
+
+                width:100%;
+            }
+        }
+
+    </style>
+
+</head>
+
+<body>
+
+    <!-- HEADER -->
+
+    <div class="header">
+        🎯 AI Proctored Examination System
+    </div>
+
+    <!-- MAIN -->
+
+    <div class="container">
+
+        <!-- VIDEO -->
+
+        <div class="video-section">
+
+            <video id="video"
+                   autoplay
+                   muted
+                   playsinline>
+            </video>
+
+        </div>
+
+        <!-- STATUS -->
+
+        <div class="status-panel">
+
+            <div class="card status"
+                 id="statusCard">
+
+                Status : Normal
+
+            </div>
+
+            <div class="card alerts"
+                 id="alertCard">
+
+                Alerts : 0
+
+            </div>
+
+            <div class="card face"
+                 id="faceCard">
+
+                Face : Detecting
+
+            </div>
+
+            <div class="card motion"
+                 id="motionCard">
+
+                Motion : No
+
+            </div>
+
+            <div class="card voice"
+                 id="voiceCard">
+
+                Voice : No
+
+            </div>
+
+        </div>
+
+    </div>
+
+    <!-- FOOTER -->
+
+    <div class="footer">
+        AI Powered Online Examination Monitoring
+    </div>
+
+    <!-- SCRIPT -->
+
+    <script>
+
+        // =========================================
+        // VARIABLES
+        // =========================================
+
+        let alerts = 0;
+
+        let voiceFrames = 0;
+
+        let lastVoiceAlertTime = 0;
+
+        const VOICE_DURATION_LIMIT = 15;
+
+        const video =
+            document.getElementById("video");
+
+        const statusCard =
+            document.getElementById("statusCard");
+
+        const alertCard =
+            document.getElementById("alertCard");
+
+        const faceCard =
+            document.getElementById("faceCard");
+
+        const motionCard =
+            document.getElementById("motionCard");
+
+        const voiceCard =
+            document.getElementById("voiceCard");
+
+        // =========================================
+        // ACCESS CAMERA + MICROPHONE
+        // =========================================
+
+        navigator.mediaDevices.getUserMedia({
+
+            video:true,
+            audio:true
+
+        })
+
+        .then(function(stream){
+
+            video.srcObject = stream;
+
+            // =========================================
+            // MICROPHONE DETECTION
+            // =========================================
+
+            const audioContext =
+                new AudioContext();
+
+            const microphone =
+                audioContext.createMediaStreamSource(stream);
+
+            const analyser =
+                audioContext.createAnalyser();
+
+            analyser.fftSize = 512;
+
+            microphone.connect(analyser);
+
+            const dataArray =
+                new Uint8Array(
+                    analyser.frequencyBinCount
+                );
+
+            function detectVoice(){
+
+                analyser.getByteFrequencyData(dataArray);
+
+                let volume = 0;
+
+                for(let i = 0; i < dataArray.length; i++){
+
+                    volume += dataArray[i];
+
+                }
+
+                volume =
+                    volume / dataArray.length;
+
+                console.log("Volume:", volume);
+
+                // =========================================
+                // VOICE ALERT
+                // =========================================
+
+                if(volume > 25){
+
+                    voiceFrames++;
+
+                    voiceCard.innerHTML =
+                        "Voice : Detected";
+
+                    const currentTime = Date.now();
+
+                    if(
+                        voiceFrames >=
+                        VOICE_DURATION_LIMIT &&
+
+                        currentTime -
+                        lastVoiceAlertTime > 3000
+                    ){
+
+                        alerts++;
+
+                        statusCard.innerHTML =
+                            "Status : Abnormal Voice";
+
+                        alertCard.innerHTML =
+                            "Alerts : " + alerts;
+
+                        lastVoiceAlertTime =
+                            currentTime;
+
+                        voiceFrames = 0;
+
+                    }
+
+                }
+
+                else{
+
+                    voiceCard.innerHTML =
+                        "Voice : No";
+
+                    if(voiceFrames > 0){
+
+                        voiceFrames--;
+
+                    }
+
+                }
+
+                // =========================================
+                // TERMINATE EXAM
+                // =========================================
+
+                if(alerts >= 3){
+
+                    statusCard.innerHTML =
+                        "EXAM TERMINATED";
+
+                    alert(
+                        "Exam Terminated"
+                    );
+
+                    stream.getTracks().forEach(
+                        track => track.stop()
+                    );
+
+                    return;
+
+                }
+
+                requestAnimationFrame(
+                    detectVoice
+                );
+
+            }
+
+            detectVoice();
+
+        })
+
+        .catch(function(error){
+
+            alert(
+                "Camera / Microphone Permission Denied"
+            );
+
+        });
+
+        // =========================================
+        // SIMULATED FACE + MOTION DETECTION
+        // =========================================
+
+        setInterval(function(){
+
+            let random = Math.random();
+
+            // Multiple Face Simulation
+
+            if(random > 0.96){
+
+                alerts++;
+
+                faceCard.innerHTML =
+                    "Face : Multiple Faces";
+
+                statusCard.innerHTML =
+                    "Status : Multiple Faces";
+
+                alertCard.innerHTML =
+                    "Alerts : " + alerts;
+
+            }
+
+            // Motion Detection Simulation
+
+            if(random < 0.04){
+
+                alerts++;
+
+                motionCard.innerHTML =
+                    "Motion : Excessive";
+
+                statusCard.innerHTML =
+                    "Status : Excessive Motion";
+
+                alertCard.innerHTML =
+                    "Alerts : " + alerts;
+
+            }
+
+        }, 5000);
+
+    </script>
+
+</body>
+
+</html>
