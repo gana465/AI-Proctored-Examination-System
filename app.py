@@ -1,6 +1,7 @@
 from flask import Flask, render_template, Response, jsonify
 import cv2
 import numpy as np
+import sounddevice as sd
 import threading
 import os
 import time
@@ -8,12 +9,17 @@ import time
 app = Flask(__name__)
 
 # =========================================
-# FACE DETECTOR
+# FACE DETECTORS
 # =========================================
 
 face_cascade = cv2.CascadeClassifier(
     cv2.data.haarcascades +
     'haarcascade_frontalface_default.xml'
+)
+
+profile_cascade = cv2.CascadeClassifier(
+    cv2.data.haarcascades +
+    'haarcascade_profileface.xml'
 )
 
 # =========================================
@@ -35,19 +41,81 @@ status = "Normal"
 face_status = "Detected"
 motion_status = "No"
 block_status = "No"
+voice_status = "No"
 
 FRAME_LIMIT = 20
 MOTION_AREA = 6000
 BRIGHTNESS_THRESHOLD = 35
 MAX_ALERTS = 3
 
+# Voice Settings
+VOICE_THRESHOLD = 0.03
+VOICE_DURATION_LIMIT = 15
+
 no_face_frames = 0
 multi_face_frames = 0
 away_frames = 0
 motion_frames = 0
 blocked_frames = 0
+voice_frames = 0
 
 prev_gray = None
+
+# =========================================
+# VOICE VARIABLES
+# =========================================
+
+voice_detected = False
+current_volume = 0
+last_voice_alert_time = 0
+
+# =========================================
+# VOICE THREAD
+# =========================================
+
+def voice_monitor():
+
+    global voice_detected
+    global current_volume
+
+    while True:
+
+        try:
+
+            audio = sd.rec(
+                int(0.3 * 44100),
+                samplerate=44100,
+                channels=1,
+                dtype='float32'
+            )
+
+            sd.wait()
+
+            volume = np.max(np.abs(audio))
+
+            current_volume = float(volume)
+
+            print("Voice Volume:", volume)
+
+            if volume > VOICE_THRESHOLD:
+
+                voice_detected = True
+
+            else:
+
+                voice_detected = False
+
+        except Exception as e:
+
+            print("Mic Error:", e)
+
+            voice_detected = False
+
+
+threading.Thread(
+    target=voice_monitor,
+    daemon=True
+).start()
 
 # =========================================
 # VIDEO STREAM
@@ -61,14 +129,17 @@ def generate_frames():
     global face_status
     global motion_status
     global block_status
+    global voice_status
 
     global no_face_frames
     global multi_face_frames
     global away_frames
     global motion_frames
     global blocked_frames
+    global voice_frames
 
     global prev_gray
+    global last_voice_alert_time
 
     while True:
 
@@ -77,7 +148,10 @@ def generate_frames():
         if not success:
             break
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.cvtColor(
+            frame,
+            cv2.COLOR_BGR2GRAY
+        )
 
         # =========================================
         # CAMERA BLOCK DETECTION
@@ -109,12 +183,28 @@ def generate_frames():
         # FACE DETECTION
         # =========================================
 
-        faces = face_cascade.detectMultiScale(
+        # Frontal faces
+        faces_front = face_cascade.detectMultiScale(
             gray,
-            scaleFactor=1.2,
-            minNeighbors=5,
-            minSize=(80, 80)
+            scaleFactor=1.1,
+            minNeighbors=3,
+            minSize=(40, 40)
         )
+
+        # Side profile faces
+        faces_profile = profile_cascade.detectMultiScale(
+            gray,
+            scaleFactor=1.1,
+            minNeighbors=3,
+            minSize=(40, 40)
+        )
+
+        # Combine detections
+        faces = list(faces_front) + list(faces_profile)
+
+        # =========================================
+        # NO FACE DETECTION
+        # =========================================
 
         if len(faces) == 0:
 
@@ -128,19 +218,49 @@ def generate_frames():
 
                 no_face_frames = 0
 
-                status = "No Face"
+                status = "No Face Detected"
 
-        elif len(faces) > 1:
+        # =========================================
+        # MULTIPLE FACE DETECTION
+        # =========================================
 
-            face_status = "Multiple Faces"
+        elif len(faces) >= 2:
+
+            face_status = "Multiple Faces Detected"
+
+            for (x, y, w, h) in faces:
+
+                cv2.rectangle(
+                    frame,
+                    (x, y),
+                    (x+w, y+h),
+                    (0, 0, 255),
+                    3
+                )
+
+                cv2.putText(
+                    frame,
+                    "FACE",
+                    (x, y - 10),
+                    cv2.FONT_HERSHEY_SIMPLEX,
+                    0.7,
+                    (0, 0, 255),
+                    2
+                )
 
             multi_face_frames += 1
 
-            if multi_face_frames == FRAME_LIMIT:
+            if multi_face_frames >= 1:
 
                 alerts += 1
 
-                status = "Multiple Faces"
+                status = "MULTIPLE FACES DETECTED"
+
+                multi_face_frames = 0
+
+        # =========================================
+        # SINGLE FACE DETECTION
+        # =========================================
 
         else:
 
@@ -158,6 +278,10 @@ def generate_frames():
             )
 
             center_x = x + w // 2
+
+            # =========================================
+            # LOOKING AWAY DETECTION
+            # =========================================
 
             if center_x < 200 or center_x > 440:
 
@@ -183,11 +307,18 @@ def generate_frames():
         # MOTION DETECTION
         # =========================================
 
-        blur = cv2.GaussianBlur(gray, (15, 15), 0)
+        blur = cv2.GaussianBlur(
+            gray,
+            (15, 15),
+            0
+        )
 
         if prev_gray is not None:
 
-            diff = cv2.absdiff(prev_gray, blur)
+            diff = cv2.absdiff(
+                prev_gray,
+                blur
+            )
 
             thresh = cv2.threshold(
                 diff,
@@ -243,6 +374,38 @@ def generate_frames():
         prev_gray = blur
 
         # =========================================
+        # VOICE DETECTION
+        # =========================================
+
+        current_time = time.time()
+
+        if voice_detected:
+
+            voice_frames += 1
+
+            voice_status = "Detected"
+
+            if (
+                voice_frames >= VOICE_DURATION_LIMIT and
+                current_time - last_voice_alert_time > 5
+            ):
+
+                alerts += 1
+
+                status = "Abnormal Voice"
+
+                voice_frames = 0
+
+                last_voice_alert_time = current_time
+
+        else:
+
+            voice_status = "No"
+
+            if voice_frames > 0:
+                voice_frames -= 1
+
+        # =========================================
         # TERMINATE EXAM
         # =========================================
 
@@ -260,7 +423,10 @@ def generate_frames():
                 4
             )
 
-            ret, buffer = cv2.imencode('.jpg', frame)
+            ret, buffer = cv2.imencode(
+                '.jpg',
+                frame
+            )
 
             frame = buffer.tobytes()
 
@@ -272,6 +438,7 @@ def generate_frames():
             )
 
             camera.release()
+
             cv2.destroyAllWindows()
 
             break
@@ -300,7 +467,40 @@ def generate_frames():
             2
         )
 
-        ret, buffer = cv2.imencode('.jpg', frame)
+        cv2.putText(
+            frame,
+            f"Face: {face_status}",
+            (20, 120),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            f"Motion: {motion_status}",
+            (20, 160),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (0, 255, 0),
+            2
+        )
+
+        cv2.putText(
+            frame,
+            f"Voice: {voice_status}",
+            (20, 200),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            1,
+            (255, 0, 255),
+            2
+        )
+
+        ret, buffer = cv2.imencode(
+            '.jpg',
+            frame
+        )
 
         frame = buffer.tobytes()
 
@@ -317,7 +517,10 @@ def generate_frames():
 
 @app.route('/')
 def home():
-    return render_template('index.html')
+
+    return render_template(
+        'index.html'
+    )
 
 # =========================================
 # VIDEO FEED
@@ -328,7 +531,8 @@ def video_feed():
 
     return Response(
         generate_frames(),
-        mimetype='multipart/x-mixed-replace; boundary=frame'
+        mimetype=
+        'multipart/x-mixed-replace; boundary=frame'
     )
 
 # =========================================
@@ -344,7 +548,8 @@ def get_status():
         'alerts': alerts,
         'face': face_status,
         'motion': motion_status,
-        'blocked': block_status
+        'blocked': block_status,
+        'voice': voice_status
     })
 
 # =========================================
@@ -353,7 +558,9 @@ def get_status():
 
 if __name__ == '__main__':
 
-    port = int(os.environ.get("PORT", 5000))
+    port = int(
+        os.environ.get("PORT", 5000)
+    )
 
     app.run(
         host='0.0.0.0',
